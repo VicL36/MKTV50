@@ -20,7 +20,7 @@ services:
           - chromium-browser
     # ✅ CORREÇÃO DEFINITIVA APLICADA AQUI
     buildCommand: "rm -rf node_modules package-lock.json && npm install && npm run build"
-    startCommand: "npm run migrate:deploy && npm start"
+    startCommand: "npm run migrate:deploy && node dist/index.js"
     envVars:
       - key: NODE_ENV
         value: production
