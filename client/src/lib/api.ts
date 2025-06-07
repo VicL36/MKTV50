@@ -1,137 +1,157 @@
-// client/src/lib/api.ts
-import { useAuthStore } from './auth';
+import { createClient } from '@supabase/supabase-js';
 
-// Helper para construir a URL completa da API
-function getApiUrl(path: string): string {
-  const apiUrlFromEnv = import.meta.env.VITE_API_URL;
-  if (apiUrlFromEnv && typeof apiUrlFromEnv === 'string' && apiUrlFromEnv.trim() !== '') {
-    // Remove barras extras e junta
-    const base = apiUrlFromEnv.replace(/\/$/, '');
-    const endpoint = path.startsWith('/') ? path : `/${path}`;
-    return `${base}${endpoint}`;
-  }
-  // Se VITE_API_URL não estiver definida, assume que a URL já é completa ou relativa à origem (para proxy)
-  return path;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error('Missing Supabase environment variables');
 }
 
-export async function apiRequest(
-  method: string,
-  url: string, // url agora é o PATH da API, ex: /auth/login
-  data?: unknown,
-  isFormData: boolean = false
-): Promise<Response> {
-  const { token } = useAuthStore.getState();
-  const fullApiUrl = getApiUrl(url); // Constrói a URL completa
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-  const headers: Record<string, string> = {};
+// API base URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-  if (!isFormData && data) {
-    headers['Content-Type'] = 'application/json';
-  }
+// Generic API request function
+async function apiRequest<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const token = localStorage.getItem('token');
+  
+  const config: RequestInit = {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+      ...options.headers,
+    },
+    ...options,
+  };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  let body;
-  if (isFormData && data instanceof FormData) {
-    body = data;
-  } else if (data) {
-    body = JSON.stringify(data);
-  } else {
-    body = undefined;
-  }
-
-  const response = await fetch(fullApiUrl, { // Usa fullApiUrl
-    method,
-    headers,
-    body,
-  });
-
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+  
   if (!response.ok) {
-    let errorMessage;
-    try {
-      const errorPayload = await response.json();
-      if (errorPayload && typeof errorPayload === 'object') {
-        if (errorPayload.error && typeof errorPayload.error === 'string' && errorPayload.error.trim() !== '') {
-          errorMessage = errorPayload.error;
-        } else if (errorPayload.message && typeof errorPayload.message === 'string' && errorPayload.message.trim() !== '') {
-          errorMessage = errorPayload.message;
-        }
-      }
-    } catch (e) {
-      try {
-        const errorText = await response.text();
-        if (errorText && errorText.trim() !== '') {
-          errorMessage = errorText;
-        }
-      } catch (textError) {}
-    }
-
-    if (!errorMessage) {
-      errorMessage = `API Error: ${response.status} ${response.statusText || ''}`.trim();
-    }
-    throw new Error(errorMessage);
+    const error = await response.text();
+    throw new Error(error || 'API request failed');
   }
 
-  return response;
+  return response.json();
 }
 
-export async function uploadFile(
-  url: string, // url agora é o PATH da API, ex: /creatives
-  file: File,
-  additionalData?: Record<string, string>,
-  method: string = 'POST'
-): Promise<Response> {
-  const { token } = useAuthStore.getState();
-  const fullApiUrl = getApiUrl(url); // Constrói a URL completa
+// Auth API
+export const authAPI = {
+  login: (email: string, password: string) =>
+    apiRequest<{ token: string; user: any }>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
 
-  const formData = new FormData();
-  formData.append('file', file); 
+  register: (email: string, password: string, name: string) =>
+    apiRequest<{ token: string; user: any }>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
+    }),
 
-  if (additionalData) {
-    Object.entries(additionalData).forEach(([key, value]) => {
-      formData.append(key, value);
-    });
-  }
+  me: () => apiRequest<{ user: any }>('/api/auth/me'),
+};
 
-  const headers: Record<string, string> = {};
+// Campaigns API
+export const campaignsAPI = {
+  getAll: () => apiRequest<any[]>('/api/campaigns'),
+  getById: (id: string) => apiRequest<any>(`/api/campaigns/${id}`),
+  create: (data: any) =>
+    apiRequest<any>('/api/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: any) =>
+    apiRequest<any>(`/api/campaigns/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    apiRequest<void>(`/api/campaigns/${id}`, {
+      method: 'DELETE',
+    }),
+};
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
+// Creatives API
+export const creativesAPI = {
+  getAll: () => apiRequest<any[]>('/api/creatives'),
+  getById: (id: string) => apiRequest<any>(`/api/creatives/${id}`),
+  create: (data: any) =>
+    apiRequest<any>('/api/creatives', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: any) =>
+    apiRequest<any>(`/api/creatives/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    apiRequest<void>(`/api/creatives/${id}`, {
+      method: 'DELETE',
+    }),
+};
 
-  const response = await fetch(fullApiUrl, { // Usa fullApiUrl
-    method: method,
-    headers,
-    body: formData,
-  });
+// Landing Pages API
+export const landingPagesAPI = {
+  getAll: () => apiRequest<any[]>('/api/landing-pages'),
+  getById: (id: string) => apiRequest<any>(`/api/landing-pages/${id}`),
+  create: (data: any) =>
+    apiRequest<any>('/api/landing-pages', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: any) =>
+    apiRequest<any>(`/api/landing-pages/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    apiRequest<void>(`/api/landing-pages/${id}`, {
+      method: 'DELETE',
+    }),
+};
 
-  if (!response.ok) {
-    let errorMessage;
-    try {
-      const errorPayload = await response.json();
-      if (errorPayload && typeof errorPayload === 'object') {
-        if (errorPayload.error && typeof errorPayload.error === 'string' && errorPayload.error.trim() !== '') {
-          errorMessage = errorPayload.error;
-        } else if (errorPayload.message && typeof errorPayload.message === 'string' && errorPayload.message.trim() !== '') {
-          errorMessage = errorPayload.message;
-        }
-      }
-    } catch (e) {
-      try {
-        const errorText = await response.text();
-        if (errorText && errorText.trim() !== '') {
-          errorMessage = errorText;
-        }
-      } catch (textError) {}
-    }
+// Metrics API
+export const metricsAPI = {
+  getByCampaign: (campaignId: string) =>
+    apiRequest<any[]>(`/api/metrics/campaign/${campaignId}`),
+  getDashboard: () => apiRequest<any>('/api/metrics/dashboard'),
+};
 
-    if (!errorMessage) {
-      errorMessage = `Upload Error: ${response.status} ${response.statusText || ''}`.trim();
-    }
-    throw new Error(errorMessage);
-  }
+// WhatsApp API
+export const whatsappAPI = {
+  getConnections: () => apiRequest<any[]>('/api/whatsapp/connections'),
+  createConnection: (data: any) =>
+    apiRequest<any>('/api/whatsapp/connections', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getQRCode: (id: string) => apiRequest<{ qrCode: string }>(`/api/whatsapp/qr/${id}`),
+  disconnect: (id: string) =>
+    apiRequest<void>(`/api/whatsapp/disconnect/${id}`, {
+      method: 'POST',
+    }),
+};
 
-  return response;
-}
+// Integrations API
+export const integrationsAPI = {
+  getAll: () => apiRequest<any[]>('/api/integrations'),
+  create: (data: any) =>
+    apiRequest<any>('/api/integrations', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: string, data: any) =>
+    apiRequest<any>(`/api/integrations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    apiRequest<void>(`/api/integrations/${id}`, {
+      method: 'DELETE',
+    }),
+};
