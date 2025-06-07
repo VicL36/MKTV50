@@ -155,3 +155,5 @@ export const integrationsAPI = {
       method: 'DELETE',
     }),
 };
+
+export { apiRequest }
